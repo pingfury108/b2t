@@ -1,6 +1,6 @@
 use axum::body::Body;
-use axum::extract::{State, Uri};
-use axum::http::{header, StatusCode};
+use axum::extract::State;
+use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 
@@ -8,9 +8,7 @@ use crate::AppState;
 
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/frontend/dist/"]
-struct Assets {
-
-}
+struct Assets;
 
 /// 托管 Astro 构建产物；书籍/章节客户端路由做内容注入（SEO）
 pub async fn static_handler(State(state): State<AppState>, uri: Uri) -> Response {
@@ -207,7 +205,7 @@ async fn seo_chapter_page(state: &AppState, chapter_id: &str) -> Option<Response
 
     html = html.replace(r#"id="reader" hidden>"#, r#"id="reader">"#);
     html = html.replace(
-        r#"id="crumb-book" href="#"></a>"#,
+        r##"id="crumb-book" href="#"></a>"##,
         &format!(
             r#"id="crumb-book" href="/app/book/{}">{}</a>"#,
             book_id,
