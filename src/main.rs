@@ -9,6 +9,7 @@ mod routes;
 mod session;
 mod static_files;
 mod tts;
+mod upload;
 mod voices;
 
 use std::path::PathBuf;
@@ -16,7 +17,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
 use axum::middleware;
-use axum::routing::{get, patch, post};
+use axum::routing::{get, patch, post, put};
 use axum::Router;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
@@ -42,6 +43,10 @@ struct Cli {
     /// 管理后台 key，不设置则后台关闭
     #[arg(long, env = "B2T_ADMIN_KEY")]
     admin_key: Option<String>,
+
+    /// 站点外部访问地址（用于 sitemap/canonical），如 https://b2t.example.com
+    #[arg(long, env = "B2T_BASE_URL")]
+    base_url: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -59,6 +64,7 @@ pub struct AppState {
     pub db: sqlx::SqlitePool,
     pub data_dir: PathBuf,
     pub admin_key: Option<String>,
+    pub base_url: Option<String>,
 }
 
 #[tokio::main]
@@ -102,6 +108,7 @@ async fn main() -> Result<()> {
         db: pool,
         data_dir: cli.data_dir,
         admin_key: cli.admin_key,
+        base_url: cli.base_url.map(|u| u.trim_end_matches('/').to_string()),
     };
 
     jobs::spawn_worker(state.clone());
@@ -121,6 +128,10 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/api/books", post(routes::upload_book).get(routes::list_books))
+        .route("/api/uploads/init", post(upload::init))
+        .route("/api/uploads/{id}", get(upload::status))
+        .route("/api/uploads/{id}/chunk", put(upload::chunk))
+        .route("/api/uploads/{id}/complete", post(upload::complete))
         .route(
             "/api/books/{id}",
             get(routes::book_detail)
@@ -138,6 +149,7 @@ async fn main() -> Result<()> {
         .route("/api/license/redeem", post(routes::redeem_license))
         .route("/api/license/{code}", get(routes::license_lookup))
         .route("/api/voices", get(routes::voice_list))
+        .route("/sitemap.xml", get(static_files::sitemap))
         .nest("/api/admin", admin_public.merge(admin_protected))
         .fallback(get(static_files::static_handler))
         .layer(DefaultBodyLimit::max(200 * 1024 * 1024))

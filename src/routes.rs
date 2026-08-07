@@ -74,17 +74,37 @@ pub async fn upload_book(
         return Err(anyhow::anyhow!("仅支持 epub / txt / md / pdf 格式").into());
     }
 
-    let book_id = nanoid::nanoid!(10);
-    let upload_path = state.data_dir.join("uploads").join(format!("{book_id}.{ext}"));
-    std::fs::write(&upload_path, &data)?;
-
+    // 写入临时文件，走统一创建流程
+    let tmp = state
+        .data_dir
+        .join("tmp")
+        .join(format!("upload_{}", nanoid::nanoid!(8)));
+    std::fs::write(&tmp, &data)?;
     let stem = file_name
         .rsplit_once('.')
         .map(|(s, _)| s.to_string())
-        .unwrap_or_else(|| file_name.clone());
+        .unwrap_or(file_name);
+    let summary = create_book_from_file(&state, &session, &ext, &stem, &tmp).await?;
+    let _ = std::fs::remove_file(&tmp);
+    Ok(Json(summary))
+}
+
+/// 解析文件并创建书籍（multipart 与分片上传共用）
+pub(crate) async fn create_book_from_file(
+    state: &AppState,
+    session: &SessionToken,
+    ext: &str,
+    stem: &str,
+    src: &std::path::Path,
+) -> ApiResult<BookSummary> {
+    let book_id = nanoid::nanoid!(10);
+    let upload_path = state.data_dir.join("uploads").join(format!("{book_id}.{ext}"));
+    std::fs::copy(src, &upload_path)?;
+
     let parsed = tokio::task::spawn_blocking({
         let path = upload_path.clone();
-        let ext = ext.clone();
+        let ext = ext.to_string();
+        let stem = stem.to_string();
         move || parser::parse_book(&path, &ext, &stem)
     })
     .await??;
@@ -94,7 +114,7 @@ pub async fn upload_book(
         .bind(&book_id)
         .bind(&session.0)
         .bind(&parsed.title)
-        .bind(&ext)
+        .bind(ext)
         .execute(&mut *tx)
         .await?;
     for (i, ch) in parsed.chapters.iter().enumerate() {
@@ -110,15 +130,15 @@ pub async fn upload_book(
     }
     tx.commit().await?;
 
-    Ok(Json(BookSummary {
+    Ok(BookSummary {
         id: book_id,
         title: parsed.title,
-        source_ext: ext,
+        source_ext: ext.to_string(),
         chapter_count: parsed.chapters.len() as i64,
         done_count: 0,
         licensed: false,
         created_at: String::new(),
-    }))
+    })
 }
 
 pub async fn list_books(

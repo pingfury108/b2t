@@ -61,15 +61,56 @@ import Layout from '../../layouts/Layout.astro';
 
     async function upload(file) {
       const msg = $('#upload-msg');
-      msg.textContent = `正在上传并解析《${file.name}》…`;
-      const fd = new FormData();
-      fd.append('file', file);
       try {
-        const book = await api('/api/books', { method: 'POST', body: fd });
+        // 1. 初始化上传会话
+        const init = await api('/api/uploads/init', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, size: file.size }),
+        });
+        const total = Math.ceil(file.size / init.chunk_size);
+
+        // 2. 断点续传：跳过服务端已收到的分片
+        const done = new Set();
+        try {
+          const st = await api('/api/uploads/' + init.upload_id);
+          st.indexes.forEach(i => done.add(i));
+        } catch {}
+
+        // 3. 逐片上传，单片失败自动重试
+        for (let i = 0; i < total; i++) {
+          if (done.has(i)) continue;
+          msg.textContent = `正在上传《${file.name}》 ${i + 1}/${total}（${Math.round(i / total * 100)}%）`;
+          const blob = file.slice(i * init.chunk_size, (i + 1) * init.chunk_size);
+          await putChunk(init.upload_id, i, blob);
+        }
+
+        // 4. 完成：拼装并解析
+        msg.textContent = '上传完成，正在解析…';
+        const book = await api(`/api/uploads/${init.upload_id}/complete`, { method: 'POST' });
         location.href = '/app/book/' + book.id;
       } catch (e) {
         msg.textContent = e.message;
         fileInput.value = '';
+      }
+    }
+
+    async function putChunk(uploadId, index, blob, retries = 3) {
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          const res = await fetch(`/api/uploads/${uploadId}/chunk?index=${index}`, {
+            method: 'PUT',
+            body: blob,
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || `分片 ${index} 上传失败`);
+          }
+          return;
+        } catch (e) {
+          if (attempt === retries) throw e;
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+        }
       }
     }
 

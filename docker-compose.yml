@@ -1,0 +1,18 @@
+services:
+  b2t:
+    build: .
+    # 或直接使用 CI 构建的镜像：
+    # image: ghcr.io/<你的用户名>/b2t:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - b2t-data:/data
+    environment:
+      # 管理后台 key（/admin 登录用），留空则后台关闭
+      - B2T_ADMIN_KEY=${B2T_ADMIN_KEY:-}
+      # 站点外部访问地址，用于 sitemap/canonical
+      - B2T_BASE_URL=${B2T_BASE_URL:-}
+    restart: unless-stopped
+
+volumes:
+  b2t-data:
