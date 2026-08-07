@@ -1,0 +1,98 @@
+---
+interface Props {
+  title: string;
+  description?: string;
+}
+const { title, description = 'B2T · 把书变成有声书。支持 EPUB / TXT / PDF，按章节合成语音，导出带章节的 MP3 / M4B。' } = Astro.props;
+---
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <slot name="head" />
+    <style is:global>
+      :root {
+        --ink: #1c1a17;
+        --ink-soft: #6b6660;
+        --bg: #faf8f4;
+        --card: #ffffff;
+        --line: #e8e2d9;
+        --accent: #b3541e;
+        --accent-soft: #f6e8dd;
+      }
+      * { box-sizing: border-box; margin: 0; }
+      body {
+        font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif;
+        background: var(--bg);
+        color: var(--ink);
+        line-height: 1.7;
+      }
+      a { color: var(--accent); text-decoration: none; }
+      .container { max-width: 880px; margin: 0 auto; padding: 0 20px; }
+      header.site {
+        border-bottom: 1px solid var(--line);
+        background: var(--bg);
+        position: sticky; top: 0; z-index: 10;
+      }
+      header.site .container {
+        display: flex; align-items: center; justify-content: space-between;
+        padding-top: 14px; padding-bottom: 14px;
+      }
+      .logo { font-size: 20px; font-weight: 700; color: var(--ink); letter-spacing: 1px; }
+      .logo span { color: var(--accent); }
+      nav.site a { margin-left: 20px; color: var(--ink-soft); font-size: 15px; }
+      nav.site a:hover { color: var(--accent); }
+      nav.site a.cta {
+        color: #fff; background: var(--accent); padding: 6px 16px; border-radius: 6px;
+      }
+      main { padding: 40px 0 80px; }
+      footer.site {
+        border-top: 1px solid var(--line); color: var(--ink-soft);
+        font-size: 13px; padding: 24px 0; text-align: center;
+      }
+      .btn {
+        display: inline-block; background: var(--accent); color: #fff;
+        padding: 10px 24px; border-radius: 6px; font-size: 16px; border: none;
+        cursor: pointer; font-family: inherit;
+      }
+      .btn.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+      .btn:disabled { opacity: .5; cursor: not-allowed; }
+      .crumbs {
+        display: flex; align-items: center; gap: 10px;
+        font-size: 14px; color: var(--ink-soft); margin-bottom: 18px;
+      }
+      .crumbs a { color: var(--ink-soft); }
+      .crumbs a:hover { color: var(--accent); }
+      .crumbs .sep { opacity: .4; }
+      .crumbs .cur {
+        color: var(--ink); font-weight: 600;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .card {
+        background: var(--card); border: 1px solid var(--line);
+        border-radius: 10px; padding: 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site">
+      <div class="container">
+        <a class="logo" href="/">B<span>2</span>T</a>
+        <nav class="site">
+          <a href="/help">使用帮助</a>
+          <a href="/app" class="cta">开始制作</a>
+        </nav>
+      </div>
+    </header>
+    <main>
+      <slot />
+    </main>
+    <footer class="site">
+      <div class="container">B2T · 把书变成有声书</div>
+    </footer>
+  </body>
+</html>

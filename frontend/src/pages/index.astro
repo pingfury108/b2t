@@ -1,0 +1,92 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+<Layout title="B2T · 把书变成有声书 | EPUB/TXT/PDF 转语音">
+  <section class="hero container">
+    <h1>把书变成<br /><em>可以听的书</em></h1>
+    <p class="sub">
+      上传 EPUB / TXT / PDF，自动按章节组织，用自然的 AI 语音朗读。
+      导出单文件带章节的 MP3 / M4B，手机、播放器随走随听。
+    </p>
+    <p class="actions">
+      <a class="btn" href="/app">免费开始</a>
+      <a class="btn secondary" href="/help">了解怎么用</a>
+    </p>
+    <p class="hint">每本书前 3 章免费合成，无需注册。</p>
+  </section>
+
+  <section class="container features">
+    <div class="card">
+      <h3>按章节组织</h3>
+      <p>自动识别书籍目录结构，逐章合成、逐章试听，一章失败不影响其他章节。</p>
+    </div>
+    <div class="card">
+      <h3>带章节的单文件</h3>
+      <p>导出内嵌章节标记的 MP3 或 M4B，在播放器里自由跳章，像真正的有声书。</p>
+    </div>
+    <div class="card">
+      <h3>多种格式导入</h3>
+      <p>支持 EPUB、TXT、Markdown 与文字型 PDF，自动识别章节标题。</p>
+    </div>
+    <div class="card">
+      <h3>前 3 章免费</h3>
+      <p>先免费试听前 3 章，满意后用授权码解锁全书。无需注册账号。</p>
+    </div>
+  </section>
+
+  <section class="container steps">
+    <h2>三步完成</h2>
+    <ol>
+      <li><strong>上传书籍</strong> —— 拖入 EPUB / TXT / PDF 文件，自动解析章节。</li>
+      <li><strong>合成语音</strong> —— 选择喜欢的声音，逐章合成，随时试听。</li>
+      <li><strong>导出收听</strong> —— 按章节打包 ZIP，或导出带章节的单文件 MP3 / M4B。</li>
+    </ol>
+  </section>
+
+  <section class="container faq">
+    <h2>常见问题</h2>
+    <details>
+      <summary>授权码是什么？</summary>
+      <p>授权码用于解锁一本书的全部章节（前 3 章免费无需授权码）。一个授权码可解锁一本书。你可以通过其他渠道购买授权码，在书籍页面输入即可解锁。</p>
+    </details>
+    <details>
+      <summary>需要注册账号吗？</summary>
+      <p>不需要。你的书籍保存在当前浏览器会话中；解锁后也可以通过授权码随时找回书籍。</p>
+    </details>
+    <details>
+      <summary>扫描版 PDF 支持吗？</summary>
+      <p>暂不支持没有文本层的扫描版 / 图片型 PDF。文字型 PDF 可以正常导入。</p>
+    </details>
+    <details>
+      <summary>MP3 和 M4B 选哪个？</summary>
+      <p>两者都带章节标记。MP3 兼容性最好；M4B 在 Apple Books 等有声书播放器中体验更好。可以两个都导出。</p>
+    </details>
+  </section>
+
+  <style>
+    .hero { text-align: center; padding: 60px 0 40px; }
+    .hero h1 { font-size: 44px; line-height: 1.3; }
+    .hero h1 em { font-style: normal; color: var(--accent); }
+    .hero .sub { color: var(--ink-soft); max-width: 560px; margin: 20px auto 0; }
+    .hero .actions { margin-top: 32px; display: flex; gap: 14px; justify-content: center; }
+    .hero .hint { margin-top: 14px; font-size: 13px; color: var(--ink-soft); }
+    .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 40px; }
+    .features h3 { margin-bottom: 8px; }
+    .features p { color: var(--ink-soft); font-size: 15px; }
+    .steps { margin-top: 64px; }
+    .steps h2, .faq h2 { margin-bottom: 16px; }
+    .steps ol { padding-left: 22px; color: var(--ink-soft); }
+    .steps li { margin: 10px 0; }
+    .faq { margin-top: 64px; }
+    .faq details {
+      background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+      padding: 14px 18px; margin-bottom: 10px;
+    }
+    .faq summary { cursor: pointer; font-weight: 600; }
+    .faq details p { color: var(--ink-soft); margin-top: 8px; font-size: 15px; }
+    @media (max-width: 640px) {
+      .features { grid-template-columns: 1fr; }
+      .hero h1 { font-size: 32px; }
+    }
+  </style>
+</Layout>

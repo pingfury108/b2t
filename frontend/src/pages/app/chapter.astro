@@ -1,0 +1,204 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+<Layout title="章节阅读 · B2T" description="阅读章节文本，边听边看。">
+  <div class="container reader" id="reader" hidden>
+    <nav class="crumbs">
+      <a href="/app">书架</a><span class="sep">/</span>
+      <a id="crumb-book" href="#"></a><span class="sep">/</span>
+      <span class="cur" id="crumb-chapter"></span>
+    </nav>
+
+    <h1 id="chapter-title"></h1>
+    <p class="meta" id="chapter-meta"></p>
+
+    <div class="action-card" id="action-card" hidden></div>
+
+    <article class="chapter-text" id="chapter-text"></article>
+
+    <nav class="pager">
+      <a id="prev-chapter" class="pager-link" hidden><span>上一章</span><b id="prev-title"></b></a>
+      <a id="next-chapter" class="pager-link next" hidden><span>下一章</span><b id="next-title"></b></a>
+    </nav>
+  </div>
+  <div class="container" id="load-error" hidden>
+    <p class="err-text" id="load-error-text"></p>
+    <p><a href="/app">← 返回书架</a></p>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    // 层次路由：/app/book/<bookId>/chapter/<chapterId>
+    const route = location.pathname.match(/^\/app\/book\/([^/]+)\/chapter\/(\d+)/);
+    const chapterId = Number(route?.[2]);
+    const state = { book: null, chapter: null, pollTimer: null };
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, opts);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `请求失败 (${res.status})`);
+      return data;
+    }
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+    function fmtChars(n) {
+      return n >= 10000 ? (n / 10000).toFixed(1) + ' 万字' : n + ' 字';
+    }
+    const view = () => state.book?.chapters.find(x => x.id === chapterId);
+
+    function renderMeta() {
+      const cv = view();
+      const c = state.chapter;
+      $('#chapter-meta').textContent =
+        `第 ${c.idx + 1} 章 · ${fmtChars(c.char_count)}` +
+        (cv?.status === 'done' ? ' · 已合成语音' : '');
+    }
+
+    // ---------- 动作区：播放器 / 合成 / 进度 / 锁定 ----------
+    function renderAction(jobs) {
+      const cv = view();
+      const box = $('#action-card');
+      if (!cv) { box.hidden = true; return; }
+      box.hidden = false;
+
+      if (cv.locked) {
+        box.innerHTML = `<div class="note">🔒 本章需解锁后才能合成语音
+          <a href="/app/book/${state.book.id}">去解锁 →</a></div>`;
+        return;
+      }
+      if (cv.status === 'done') {
+        box.innerHTML = `<audio controls src="/api/chapters/${cv.id}/audio"></audio>`;
+        return;
+      }
+      if (['queued', 'synthesizing'].includes(cv.status)) {
+        const job = jobs?.find(j => j.chapter_id === cv.id);
+        const prog = job && job.total > 0 ? ` ${job.progress}/${job.total}` : '…';
+        box.innerHTML = `<div class="note">合成中${prog}</div>`;
+        return;
+      }
+      box.innerHTML = `
+        <button class="btn" id="synth-btn">${cv.status === 'error' ? '重试合成' : '▶ 合成此章'}</button>
+        ${cv.error ? `<div class="err-inline">${escapeHtml(cv.error)}</div>` : ''}`;
+      $('#synth-btn').addEventListener('click', synth);
+    }
+
+    async function synth() {
+      try {
+        await api(`/api/books/${state.book.id}/synthesize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chapter_ids: [chapterId] }),
+        });
+        poll();
+      } catch (e) {
+        $('#action-card').innerHTML = `<div class="err-inline">${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    async function poll() {
+      const [book, jobs] = await Promise.all([
+        api('/api/books/' + state.chapter.book_id),
+        api('/api/books/' + state.chapter.book_id + '/jobs'),
+      ]);
+      state.book = book;
+      renderMeta();
+      renderAction(jobs);
+      const busy = ['queued', 'synthesizing'].includes(view()?.status);
+      if (busy && !state.pollTimer) state.pollTimer = setInterval(poll, 2500);
+      if (!busy && state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+    }
+
+    // ---------- 启动 ----------
+    async function boot() {
+      if (!chapterId) { location.href = '/app'; return; }
+      try {
+        const c = await api('/api/chapters/' + chapterId + '/text');
+        const [book, jobs] = await Promise.all([
+          api('/api/books/' + c.book_id),
+          api('/api/books/' + c.book_id + '/jobs'),
+        ]);
+        state.chapter = c;
+        state.book = book;
+
+        document.title = `${c.title} · ${book.title}`;
+        $('#crumb-book').textContent = book.title;
+        $('#crumb-book').href = '/app/book/' + c.book_id;
+        $('#crumb-chapter').textContent = c.title;
+        $('#chapter-title').textContent = c.title;
+        renderMeta();
+        $('#chapter-text').textContent = c.text || '（空）';
+        renderAction(jobs);
+
+        const prev = book.chapters.find(x => x.idx === c.idx - 1);
+        const next = book.chapters.find(x => x.idx === c.idx + 1);
+        if (prev) {
+          $('#prev-chapter').hidden = false;
+          $('#prev-chapter').href = `/app/book/${c.book_id}/chapter/${prev.id}`;
+          $('#prev-title').textContent = (prev.locked ? '🔒 ' : '') + prev.title;
+        }
+        if (next) {
+          $('#next-chapter').hidden = false;
+          $('#next-chapter').href = `/app/book/${c.book_id}/chapter/${next.id}`;
+          $('#next-title').textContent = (next.locked ? '🔒 ' : '') + next.title;
+        }
+
+        $('#reader').hidden = false;
+        const cv = view();
+        if (['queued', 'synthesizing'].includes(cv?.status)) poll();
+      } catch (e) {
+        $('#load-error').hidden = false;
+        $('#load-error-text').textContent = e.message;
+      }
+    }
+    boot();
+  </script>
+
+  <style is:global>
+    .reader { max-width: 680px; padding-bottom: 60px; }
+    h1 { font-size: 30px; line-height: 1.4; margin-bottom: 8px; }
+    .meta { color: var(--ink-soft); font-size: 14px; margin-bottom: 28px; }
+
+    .action-card {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 10px; padding: 14px 18px; margin-bottom: 32px;
+      position: sticky; top: 70px; z-index: 5;
+      box-shadow: 0 2px 10px rgba(0,0,0,.05);
+    }
+    .action-card audio { width: 100%; height: 36px; display: block; }
+    .action-card .note { color: var(--ink-soft); font-size: 15px; }
+    .action-card .note a { margin-left: 8px; }
+    .err-inline { color: #c62828; font-size: 13px; margin-top: 8px; }
+
+    .chapter-text {
+      white-space: pre-wrap; line-height: 2.05; font-size: 17px;
+      text-align: justify;
+    }
+
+    .pager {
+      display: flex; justify-content: space-between; gap: 14px;
+      margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--line);
+    }
+    .pager-link {
+      display: flex; flex-direction: column; gap: 2px;
+      max-width: 48%; color: var(--ink);
+    }
+    .pager-link[hidden] { display: none; }
+    .pager-link span { font-size: 13px; color: var(--ink-soft); }
+    .pager-link b {
+      font-weight: 600; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .pager-link:hover span, .pager-link:hover b { color: var(--accent); }
+    .pager-link.next { margin-left: auto; text-align: right; }
+
+    .err-text { color: var(--accent); margin: 60px 0 12px; text-align: center; }
+    @media (max-width: 720px) {
+      h1 { font-size: 24px; }
+      .chapter-text { font-size: 16px; line-height: 1.95; }
+      .action-card { position: static; }
+    }
+  </style>
+</Layout>

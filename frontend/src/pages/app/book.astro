@@ -1,0 +1,402 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+<Layout title="制作台 · B2T" description="按章节合成语音，导出带章节的有声书。">
+  <div class="container workbench" id="workbench" hidden>
+    <nav class="crumbs">
+      <a href="/app">书架</a><span class="sep">/</span><span class="cur" id="crumb-book"></span>
+    </nav>
+    <header class="wb-head">
+      <h1 id="book-title"></h1>
+      <div class="head-meta">
+        <select id="voice-select" title="朗读语音"></select>
+        <span class="badge" id="license-badge"></span>
+      </div>
+    </header>
+
+    <div class="unlock-banner" id="unlock-banner" hidden>
+      <span>前 <b id="free-count"></b> 章免费，输入授权码解锁全书</span>
+      <div class="row">
+        <input id="redeem-code" type="text" placeholder="XXXX-XXXX-XXXX" />
+        <button class="btn" id="redeem-btn">解锁</button>
+      </div>
+      <p class="msg" id="redeem-msg"></p>
+    </div>
+
+    <ol class="steps" id="steps">
+      <li data-step="1" class="done"><b>1 解析</b><span id="step1-text"></span></li>
+      <li data-step="2"><b>2 合成</b><span id="step2-text"></span></li>
+      <li data-step="3"><b>3 导出</b><span id="step3-text"></span></li>
+    </ol>
+
+    <div class="actions-bar">
+      <button class="btn" id="synth-all">合成全部可用章节</button>
+      <span class="export-group">
+        导出：
+        <button class="btn secondary" id="export-zip">ZIP</button>
+        <button class="btn secondary" id="export-mp3">MP3（带章节）</button>
+        <button class="btn secondary" id="export-m4b">M4B</button>
+      </span>
+    </div>
+    <p class="msg" id="action-msg"></p>
+
+    <table class="chapters">
+      <thead>
+        <tr><th>#</th><th>章节</th><th>字数</th><th>状态</th><th>操作</th></tr>
+      </thead>
+      <tbody id="chapter-rows"></tbody>
+    </table>
+
+    <div class="playerbar" id="playerbar" hidden>
+      <div class="playerbar-inner">
+        <span class="player-title" id="player-title"></span>
+        <audio id="player" controls></audio>
+        <button class="player-close" id="player-close" title="关闭">✕</button>
+      </div>
+    </div>
+  </div>
+  <div class="container" id="load-error" hidden>
+    <p class="load-error" id="load-error-text"></p>
+    <p><a href="/app">← 返回书架</a></p>
+  </div>
+
+  <script>
+    import { promptDialog } from '../../scripts/dialog.js';
+
+    const $ = (s) => document.querySelector(s);
+    // 层次路由：/app/book/<id>；兼容旧的 ?id= 形式
+    const pathId = location.pathname.match(/^\/app\/book\/([^/]+)/)?.[1];
+    const queryId = new URLSearchParams(location.search).get('id');
+    if (!pathId && queryId) {
+      location.replace('/app/book/' + queryId);
+    }
+    const bookId = pathId || queryId;
+    const state = { book: null, jobs: [], pollTimer: null };
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, opts);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `请求失败 (${res.status})`);
+      return data;
+    }
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+    function fmtChars(n) {
+      return n >= 10000 ? (n / 10000).toFixed(1) + ' 万字' : n + ' 字';
+    }
+    function fmtDuration(ms) {
+      if (!ms) return '';
+      const m = Math.floor(ms / 60000);
+      return m >= 60 ? (m / 60).toFixed(1) + ' 小时' : m + ' 分钟';
+    }
+    const STATUS_TEXT = {
+      pending: '待合成', queued: '排队中', synthesizing: '合成中',
+      done: '已完成', error: '失败',
+    };
+
+    function statusText(c) {
+      if (c.locked) return 'locked';
+      let s = STATUS_TEXT[c.status] || c.status;
+      if (c.status === 'synthesizing') {
+        const job = state.jobs.find(j => j.chapter_id === c.id);
+        if (job && job.total > 0) s = `合成中 ${job.progress}/${job.total}`;
+      }
+      return s;
+    }
+
+    // ---------- 渲染 ----------
+    function rowHtml(c) {
+      const s = statusText(c);
+      const actions = [
+        c.status === 'done' ? `<a href="#" data-play="${c.id}">试听</a>` : '',
+        `<a href="/app/book/${bookId}/chapter/${c.id}">文本</a>`,
+        (!c.locked && !['done', 'queued', 'synthesizing'].includes(c.status))
+          ? `<a href="#" data-synth="${c.id}">${c.status === 'error' ? '重试' : '合成'}</a>` : '',
+        c.status === 'error' && c.error
+          ? `<span class="err" title="${escapeHtml(c.error)}">查看错误</span>` : '',
+      ].filter(Boolean).join(' ');
+      return `<tr data-cid="${c.id}" class="${c.locked ? 'locked' : ''}">
+        <td>${c.idx + 1}</td>
+        <td style="padding-left:${12 + (c.level || 0) * 20}px"><a href="#" data-rename="${c.id}" title="点击修改标题">${escapeHtml(c.title)}</a></td>
+        <td>${fmtChars(c.char_count)}${c.duration_ms ? ' · ' + fmtDuration(c.duration_ms) : ''}</td>
+        <td class="c-status" data-v="${s}">${s === 'locked' ? '🔒 未解锁' : s}</td>
+        <td class="ops">${actions}</td>
+      </tr>`;
+    }
+
+    function renderTable() {
+      $('#chapter-rows').innerHTML = state.book.chapters.map(rowHtml).join('');
+    }
+
+    function renderHead() {
+      const b = state.book;
+      $('#book-title').textContent = b.title;
+      $('#crumb-book').textContent = b.title;
+      $('#voice-select').value = b.voice;
+      $('#license-badge').textContent = b.licensed ? '已解锁全书' : `免费前 ${b.free_count} 章`;
+      $('#license-badge').className = 'badge ' + (b.licensed ? 'ok' : '');
+      $('#unlock-banner').hidden = b.licensed;
+      $('#free-count').textContent = b.free_count;
+    }
+
+    function renderSteps() {
+      const chs = state.book.chapters;
+      const done = chs.filter(c => c.status === 'done').length;
+      const busy = chs.some(c => ['queued', 'synthesizing'].includes(c.status));
+      $('#step1-text').textContent = `${chs.length} 章`;
+      $('#step2-text').textContent = done === chs.length && chs.length > 0
+        ? `全部完成 ${done}/${chs.length}`
+        : busy || done > 0 ? `${done}/${chs.length}` : '未开始';
+      $('#step3-text').textContent = done > 0 ? `已合成 ${done} 章可导出` : '待合成';
+      const li = (n) => document.querySelector(`#steps [data-step="${n}"]`);
+      li(1).className = 'done';
+      li(2).className = done === chs.length && chs.length > 0 ? 'done' : busy ? 'active' : '';
+      li(3).className = done > 0 ? 'active' : '';
+      $('#export-zip').disabled = $('#export-mp3').disabled = $('#export-m4b').disabled = done === 0;
+    }
+
+    function renderAll() {
+      renderHead();
+      renderSteps();
+      renderTable();
+    }
+
+    // ---------- 章节操作 ----------
+    $('#chapter-rows').addEventListener('click', async (e) => {
+      const t = e.target;
+      if (!t.dataset.play && !t.dataset.synth && !t.dataset.rename) return;
+      e.preventDefault();
+      if (t.dataset.play) {
+        const c = state.book.chapters.find(x => x.id == t.dataset.play);
+        $('#player-title').textContent = c ? c.title : '';
+        const player = $('#player');
+        player.src = '/api/chapters/' + t.dataset.play + '/audio';
+        $('#playerbar').hidden = false;
+        player.play();
+      } else if (t.dataset.synth) {
+        await synth([Number(t.dataset.synth)]);
+      } else if (t.dataset.rename) {
+        const c = state.book.chapters.find(x => x.id == t.dataset.rename);
+        const title = await promptDialog('修改章节标题', c.title);
+        if (title && title.trim()) {
+          await api('/api/chapters/' + c.id, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title.trim() }),
+          });
+          c.title = title.trim();
+          renderTable();
+        }
+      }
+    });
+
+    $('#player-close').addEventListener('click', () => {
+      $('#player').pause();
+      $('#player').removeAttribute('src');
+      $('#playerbar').hidden = true;
+    });
+
+    async function synth(ids) {
+      const msg = $('#action-msg');
+      try {
+        const res = await api('/api/books/' + bookId + '/synthesize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chapter_ids: ids }),
+        });
+        msg.textContent = `已加入队列 ${res.queued} 章` +
+          (res.locked ? `，${res.locked} 章未解锁` : '') +
+          (res.skipped ? `，${res.skipped} 章已合成或在队列中` : '');
+        refresh();
+      } catch (e) { msg.textContent = e.message; }
+    }
+    $('#synth-all').addEventListener('click', () => synth(null));
+
+    $('#redeem-btn').addEventListener('click', async () => {
+      const code = $('#redeem-code').value.trim();
+      const msg = $('#redeem-msg');
+      if (!code) return;
+      try {
+        const res = await api('/api/license/redeem', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, book_id: bookId }),
+        });
+        msg.textContent = res.message;
+        state.book = await api('/api/books/' + bookId);
+        renderAll();
+      } catch (e) { msg.textContent = e.message; }
+    });
+
+    // ---------- 导出 ----------
+    $('#export-zip').addEventListener('click', () => download('zip'));
+    $('#export-mp3').addEventListener('click', () => download('mp3'));
+    $('#export-m4b').addEventListener('click', () => download('m4b'));
+    async function download(kind) {
+      const msg = $('#action-msg');
+      msg.textContent = '正在生成导出文件…';
+      try {
+        const res = await fetch(`/api/books/${bookId}/export.${kind}`);
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || '导出失败');
+        }
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${state.book.title}.${kind}`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        msg.textContent = '';
+      } catch (e) { msg.textContent = e.message; }
+    }
+
+    // ---------- 语音 ----------
+    async function loadVoices() {
+      const voices = await api('/api/voices');
+      $('#voice-select').innerHTML = voices.map(v =>
+        `<option value="${v.id}">${v.name}</option>`).join('');
+    }
+    $('#voice-select').addEventListener('change', async (e) => {
+      await api('/api/books/' + bookId, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice: e.target.value }),
+      });
+      state.book.voice = e.target.value;
+    });
+
+    // ---------- 轮询：只替换状态变化的行 ----------
+    async function refresh() {
+      if (!state.book) return;
+      const [book, jobs] = await Promise.all([
+        api('/api/books/' + bookId),
+        api('/api/books/' + bookId + '/jobs'),
+      ]);
+      state.book = book;
+      state.jobs = jobs;
+      renderSteps();
+      for (const c of book.chapters) {
+        const tr = document.querySelector(`tr[data-cid="${c.id}"]`);
+        if (!tr) continue;
+        const cell = tr.querySelector('.c-status');
+        if (cell && cell.dataset.v !== statusText(c)) {
+          const tmp = document.createElement('tbody');
+          tmp.innerHTML = rowHtml(c);
+          tr.replaceWith(tmp.firstElementChild);
+        }
+      }
+      const busy = book.chapters.some(c => ['queued', 'synthesizing'].includes(c.status));
+      if (busy) {
+        if (!state.pollTimer) state.pollTimer = setInterval(refresh, 2500);
+      } else {
+        stopPoll();
+      }
+    }
+    function stopPoll() {
+      if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+    }
+
+    // ---------- 启动 ----------
+    async function boot() {
+      if (!bookId) { location.href = '/app'; return; }
+      try {
+        await loadVoices();
+        state.book = await api('/api/books/' + bookId);
+        state.jobs = await api('/api/books/' + bookId + '/jobs');
+      } catch (e) {
+        $('#load-error').hidden = false;
+        $('#load-error-text').textContent = e.message;
+        return;
+      }
+      $('#workbench').hidden = false;
+      document.title = `${state.book.title} · B2T 制作台`;
+      renderAll();
+      refresh();
+    }
+    boot();
+  </script>
+
+  <style is:global>
+    .workbench { padding-bottom: 90px; }
+    .wb-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .wb-head h1 { font-size: 24px; flex: 1; min-width: 200px; }
+    .head-meta { display: flex; align-items: center; gap: 10px; }
+    #voice-select {
+      padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px;
+      font-family: inherit; background: var(--card); font-size: 14px;
+    }
+    .badge {
+      font-size: 13px; background: var(--accent-soft); color: var(--accent);
+      padding: 4px 12px; border-radius: 20px; white-space: nowrap;
+    }
+    .badge.ok { background: #e6f3e7; color: #2e7d32; }
+
+    .unlock-banner {
+      background: var(--accent-soft); border: 1px solid var(--accent);
+      border-radius: 10px; padding: 16px 20px; margin-top: 16px;
+    }
+    .unlock-banner .row { display: flex; gap: 10px; margin-top: 10px; max-width: 420px; }
+    .unlock-banner input {
+      flex: 1; padding: 8px 12px; border: 1px solid var(--line);
+      border-radius: 6px; font-family: inherit; font-size: 14px; background: var(--card);
+    }
+    .unlock-banner .msg { color: var(--accent); font-size: 13px; margin-top: 6px; min-height: 1em; }
+
+    .steps {
+      display: flex; gap: 12px; list-style: none; padding: 0; margin: 20px 0;
+    }
+    .steps li {
+      flex: 1; background: var(--card); border: 1px solid var(--line);
+      border-radius: 8px; padding: 12px 16px; color: var(--ink-soft);
+      display: flex; flex-direction: column; gap: 2px; font-size: 13px;
+    }
+    .steps li b { font-size: 15px; color: inherit; }
+    .steps li.done { border-color: #2e7d32; color: #2e7d32; }
+    .steps li.active { border-color: var(--accent); color: var(--accent); }
+
+    .actions-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 4px; }
+    .export-group { color: var(--ink-soft); font-size: 14px; display: flex; gap: 8px; align-items: center; }
+    .msg { color: var(--accent); font-size: 14px; min-height: 1.4em; margin: 4px 0; }
+
+    .chapters { width: 100%; border-collapse: collapse; background: var(--card); }
+    .chapters th, .chapters td {
+      text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 15px;
+    }
+    .chapters th { color: var(--ink-soft); font-weight: 600; font-size: 13px; }
+    .chapters tr.locked { color: #b0a99f; }
+    .chapters .ops a { margin-right: 10px; white-space: nowrap; }
+    .chapters .err { color: #c62828; font-size: 13px; cursor: help; }
+
+    .playerbar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+      background: var(--card); border-top: 1px solid var(--line);
+      padding: 10px 20px; box-shadow: 0 -2px 12px rgba(0,0,0,.06);
+    }
+    .playerbar[hidden] { display: none; }
+    .playerbar-inner {
+      max-width: 880px; margin: 0 auto;
+      display: flex; align-items: center; gap: 14px;
+    }
+    .player-title {
+      font-size: 14px; max-width: 240px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .playerbar audio { flex: 1; height: 36px; }
+    .player-close {
+      border: none; background: none; cursor: pointer; font-size: 16px;
+      color: var(--ink-soft); padding: 4px 8px;
+    }
+    .player-close:hover { color: var(--accent); }
+
+    .load-error { color: var(--accent); margin: 60px 0 12px; text-align: center; }
+
+    @media (max-width: 720px) {
+      .steps { flex-direction: column; }
+      .player-title { display: none; }
+    }
+  </style>
+</Layout>

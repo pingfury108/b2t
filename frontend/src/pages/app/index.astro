@@ -1,0 +1,180 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+<Layout title="我的书架 · B2T" description="上传书籍，按章节合成语音，导出带章节的有声书。">
+  <div class="container shelf">
+    <section class="card upload">
+      <label class="drop" id="drop">
+        <input id="file" type="file" accept=".epub,.txt,.md,.pdf" hidden />
+        <div class="drop-inner">
+          <strong id="drop-text">点击选择文件，或把书拖到这里</strong>
+          <span>支持 EPUB / TXT / MD / 文字型 PDF · 前 3 章免费合成</span>
+        </div>
+      </label>
+      <p class="msg" id="upload-msg"></p>
+    </section>
+
+    <section>
+      <h2 class="section-title">我的书</h2>
+      <div id="book-list" class="grid"></div>
+    </section>
+
+    <section class="recover">
+      <details>
+        <summary>有授权码？找回我的书</summary>
+        <div class="row">
+          <input id="recover-code" type="text" placeholder="输入授权码，如 XXXX-XXXX-XXXX" />
+          <button class="btn secondary" id="recover-btn">找回</button>
+        </div>
+        <p class="msg" id="recover-msg"></p>
+      </details>
+    </section>
+  </div>
+
+  <script>
+    import { alertDialog, confirmDialog } from '../../scripts/dialog.js';
+
+    const $ = (s) => document.querySelector(s);
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, opts);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `请求失败 (${res.status})`);
+      return data;
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    // ---------- 上传 ----------
+    const fileInput = $('#file');
+    $('#drop').addEventListener('click', () => fileInput.click());
+    $('#drop').addEventListener('dragover', (e) => e.preventDefault());
+    $('#drop').addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', () => fileInput.files[0] && upload(fileInput.files[0]));
+
+    async function upload(file) {
+      const msg = $('#upload-msg');
+      msg.textContent = `正在上传并解析《${file.name}》…`;
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const book = await api('/api/books', { method: 'POST', body: fd });
+        location.href = '/app/book/' + book.id;
+      } catch (e) {
+        msg.textContent = e.message;
+        fileInput.value = '';
+      }
+    }
+
+    // ---------- 找回 ----------
+    $('#recover-btn').addEventListener('click', async () => {
+      const code = $('#recover-code').value.trim();
+      const msg = $('#recover-msg');
+      if (!code) return;
+      try {
+        const data = await api('/api/license/' + encodeURIComponent(code));
+        if (data.book_id) {
+          location.href = '/app/book/' + data.book_id;
+        } else {
+          msg.textContent = '该授权码未绑定书籍（可能尚未使用）';
+        }
+      } catch (e) { msg.textContent = e.message; }
+    });
+
+    // ---------- 书架 ----------
+    async function loadBooks() {
+      const box = $('#book-list');
+      let books;
+      try {
+        books = await api('/api/books');
+      } catch (e) {
+        box.innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
+        return;
+      }
+      if (!books.length) {
+        box.innerHTML = '<p class="empty">还没有书，先上传一本吧。</p>';
+        return;
+      }
+      box.innerHTML = books.map(b => `
+        <a class="card book-card" href="/app/book/${b.id}">
+          <div class="book-title">${escapeHtml(b.title)}</div>
+          <div class="meta">${b.source_ext.toUpperCase()} · ${b.chapter_count} 章</div>
+          <div class="meta">
+            已合成 ${b.done_count} 章
+            ${b.licensed ? ' · <span class="ok">已解锁</span>' : ''}
+          </div>
+          ${b.licensed ? '' : `<button class="del" data-del="${b.id}" data-title="${escapeHtml(b.title)}" title="删除">✕</button>`}
+        </a>`).join('');
+    }
+
+    $('#book-list').addEventListener('click', async (e) => {
+      const del = e.target.closest('[data-del]');
+      if (!del) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const ok = await confirmDialog(
+        `确认删除《${del.dataset.title}》？\n章节、音频与导出文件将一并删除，不可恢复。`);
+      if (!ok) return;
+      try {
+        await api('/api/books/' + del.dataset.del, { method: 'DELETE' });
+        loadBooks();
+      } catch (err) {
+        alertDialog(err.message);
+      }
+    });
+
+    loadBooks();
+  </script>
+
+  <style is:global>
+    .shelf section { margin-bottom: 32px; }
+    .upload { padding: 12px; }
+    .drop { display: block; cursor: pointer; }
+    .drop-inner {
+      border: 2px dashed var(--line); border-radius: 8px;
+      padding: 56px 20px; text-align: center;
+      display: flex; flex-direction: column; gap: 8px;
+      color: var(--ink-soft);
+    }
+    .drop-inner strong { font-size: 18px; color: var(--ink); }
+    .drop-inner span { font-size: 14px; }
+    .drop:hover .drop-inner { border-color: var(--accent); }
+    .drop:hover .drop-inner strong { color: var(--accent); }
+    .msg { color: var(--accent); font-size: 14px; margin-top: 8px; min-height: 1em; padding: 0 8px; }
+    .section-title { margin-bottom: 16px; }
+    .empty { color: var(--ink-soft); }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .book-card { display: block; color: var(--ink); transition: border-color .15s; position: relative; }
+    .book-card:hover { border-color: var(--accent); }
+    .book-card .del {
+      position: absolute; top: 12px; right: 12px;
+      border: none; background: none; cursor: pointer;
+      color: var(--ink-soft); font-size: 13px; padding: 4px;
+      line-height: 1; opacity: .35; transition: opacity .15s, color .15s;
+    }
+    .book-card:hover .del { opacity: .8; }
+    .book-card .del:hover { color: #c62828; opacity: 1; }
+    .book-title { font-weight: 600; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .book-card .meta { color: var(--ink-soft); font-size: 13px; }
+    .ok { color: #2e7d32; }
+    .recover details {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 10px; padding: 14px 18px;
+    }
+    .recover summary { cursor: pointer; color: var(--ink-soft); font-size: 14px; }
+    .recover .row { display: flex; gap: 10px; margin-top: 12px; }
+    .recover input {
+      flex: 1; padding: 10px 14px; border: 1px solid var(--line);
+      border-radius: 6px; font-size: 15px; font-family: inherit; background: var(--bg);
+    }
+    @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+    @media (min-width: 721px) and (max-width: 960px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</Layout>

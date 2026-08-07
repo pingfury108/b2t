@@ -1,0 +1,210 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+<Layout title="管理后台 · B2T" description="授权码管理后台（隐藏入口）。">
+  <meta slot="head" name="robots" content="noindex,nofollow" />
+  <div class="container admin">
+    <section class="card login-card" id="login-card">
+      <h2>管理后台</h2>
+      <div class="row">
+        <input id="login-key" type="password" placeholder="管理员 Key" />
+        <button class="btn" id="login-btn">登录</button>
+      </div>
+      <p class="msg" id="login-msg"></p>
+    </section>
+
+    <div id="panel" hidden>
+      <div class="panel-head">
+        <h2>授权码管理</h2>
+        <button class="btn secondary" id="logout-btn">退出登录</button>
+      </div>
+
+      <div class="stats">
+        <div class="card stat"><span class="num" id="stat-unused">-</span><span>未使用</span></div>
+        <div class="card stat"><span class="num" id="stat-used">-</span><span>已使用</span></div>
+        <div class="card stat"><span class="num" id="stat-total">-</span><span>总数</span></div>
+      </div>
+
+      <section class="card generate">
+        <h3>生成授权码</h3>
+        <div class="row">
+          <input id="gen-count" type="number" min="1" max="500" value="10" />
+          <button class="btn" id="gen-btn">生成</button>
+        </div>
+        <div id="gen-result" hidden>
+          <p class="warn">明文授权码只显示这一次，请立即复制保存：</p>
+          <textarea id="gen-codes" readonly rows="8"></textarea>
+          <button class="btn secondary" id="copy-btn">复制全部</button>
+        </div>
+      </section>
+
+      <section class="list">
+        <div class="list-head">
+          <h3>授权码列表</h3>
+          <select id="filter">
+            <option value="">全部状态</option>
+            <option value="unused">未使用</option>
+            <option value="used">已使用</option>
+          </select>
+        </div>
+        <table>
+          <thead>
+            <tr><th>标识</th><th>状态</th><th>绑定书籍</th><th>创建时间</th><th>使用时间</th><th>操作</th></tr>
+          </thead>
+          <tbody id="code-rows"></tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    import { alertDialog, confirmDialog } from '../../scripts/dialog.js';
+
+    const $ = (s) => document.querySelector(s);
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, opts);
+      if (res.status === 401) { showLogin(); throw new Error('未登录'); }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `请求失败 (${res.status})`);
+      return data;
+    }
+
+    function showLogin() {
+      $('#login-card').hidden = false;
+      $('#panel').hidden = true;
+    }
+    function showPanel() {
+      $('#login-card').hidden = true;
+      $('#panel').hidden = false;
+      refresh();
+    }
+
+    $('#login-btn').addEventListener('click', async () => {
+      const key = $('#login-key').value;
+      try {
+        await api('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key }),
+        });
+        $('#login-key').value = '';
+        $('#login-msg').textContent = '';
+        showPanel();
+      } catch (e) { $('#login-msg').textContent = e.message; }
+    });
+    $('#login-key').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('#login-btn').click();
+    });
+
+    $('#logout-btn').addEventListener('click', async () => {
+      await api('/api/admin/logout', { method: 'POST' }).catch(() => {});
+      showLogin();
+    });
+
+    async function refresh() {
+      const [stats, codes] = await Promise.all([
+        api('/api/admin/stats'),
+        api('/api/admin/codes?status=' + encodeURIComponent($('#filter').value)),
+      ]);
+      $('#stat-unused').textContent = stats.unused;
+      $('#stat-used').textContent = stats.used;
+      $('#stat-total').textContent = stats.total;
+      renderRows(codes);
+    }
+
+    function renderRows(codes) {
+      $('#code-rows').innerHTML = codes.map(c => `
+        <tr>
+          <td class="mono">${c.code_hash.slice(0, 8)}…</td>
+          <td><span class="badge ${c.status}">${c.status === 'unused' ? '未使用' : '已使用'}</span></td>
+          <td>${c.book_title ? escapeHtml(c.book_title) : '-'}</td>
+          <td>${c.created_at}</td>
+          <td>${c.used_at || '-'}</td>
+          <td>${c.status === 'unused'
+            ? `<a href="#" data-del="${c.code_hash}">删除</a>`
+            : '<span class="muted">不可删</span>'}</td>
+        </tr>`).join('') || '<tr><td colspan="6" class="muted">暂无数据</td></tr>';
+    }
+
+    $('#code-rows').addEventListener('click', async (e) => {
+      const hash = e.target.dataset.del;
+      if (!hash) return;
+      e.preventDefault();
+      if (!(await confirmDialog('确认删除该授权码？删除后无法使用。'))) return;
+      try {
+        await api('/api/admin/codes/' + hash, { method: 'DELETE' });
+        refresh();
+      } catch (e) { alertDialog(e.message); }
+    });
+
+    $('#filter').addEventListener('change', refresh);
+
+    $('#gen-btn').addEventListener('click', async () => {
+      const count = Number($('#gen-count').value) || 1;
+      try {
+        const data = await api('/api/admin/codes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ count }),
+        });
+        $('#gen-codes').value = data.codes.join('\n');
+        $('#gen-result').hidden = false;
+        refresh();
+      } catch (e) { alertDialog(e.message); }
+    });
+
+    $('#copy-btn').addEventListener('click', async () => {
+      await navigator.clipboard.writeText($('#gen-codes').value);
+      $('#copy-btn').textContent = '已复制';
+      setTimeout(() => ($('#copy-btn').textContent = '复制全部'), 1500);
+    });
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    // 尝试用已有 cookie 直接进入面板
+    api('/api/admin/stats').then(showPanel).catch(() => showLogin());
+  </script>
+
+  <style is:global>
+    .login-card { max-width: 420px; margin: 60px auto; text-align: center; }
+    .login-card h2 { margin-bottom: 20px; }
+    .row { display: flex; gap: 10px; }
+    .row input {
+      flex: 1; padding: 10px 14px; border: 1px solid var(--line);
+      border-radius: 6px; font-size: 15px; font-family: inherit; background: var(--bg);
+    }
+    .msg { color: var(--accent); font-size: 14px; margin-top: 8px; min-height: 1em; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
+    .stat { text-align: center; padding: 16px; }
+    .stat .num { display: block; font-size: 28px; font-weight: 700; color: var(--accent); }
+    .stat span:last-child { color: var(--ink-soft); font-size: 14px; }
+    .generate { margin-bottom: 24px; }
+    .generate h3 { margin-bottom: 12px; }
+    .generate input[type="number"] { max-width: 120px; }
+    .warn { color: var(--accent); margin: 14px 0 8px; font-size: 14px; }
+    #gen-codes {
+      width: 100%; font-family: ui-monospace, monospace; font-size: 14px;
+      border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: var(--bg);
+    }
+    #copy-btn { margin-top: 8px; }
+    .list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .list select {
+      padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
+      font-family: inherit; background: var(--card);
+    }
+    table { width: 100%; border-collapse: collapse; background: var(--card); }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 14px; }
+    th { color: var(--ink-soft); font-size: 13px; }
+    .mono { font-family: ui-monospace, monospace; }
+    .badge { font-size: 12px; padding: 3px 10px; border-radius: 20px; }
+    .badge.unused { background: var(--accent-soft); color: var(--accent); }
+    .badge.used { background: #e6f3e7; color: #2e7d32; }
+    .muted { color: var(--ink-soft); font-size: 13px; }
+  </style>
+</Layout>
