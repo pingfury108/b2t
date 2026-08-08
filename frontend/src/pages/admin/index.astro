@@ -62,6 +62,14 @@ import Layout from '../../layouts/Layout.astro';
 
     const $ = (s) => document.querySelector(s);
 
+    // DB 存的是 UTC（YYYY-MM-DD HH:MM:SS），转为浏览器本地时区显示
+    function localTime(s) {
+      if (!s) return '-';
+      const d = new Date(s.replace(' ', 'T') + 'Z');
+      const p = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    }
+
     async function api(path, opts = {}) {
       const res = await fetch(path, opts);
       if (res.status === 401) { showLogin(); throw new Error('未登录'); }
@@ -119,8 +127,8 @@ import Layout from '../../layouts/Layout.astro';
           <td class="mono">${c.code_hash.slice(0, 8)}…</td>
           <td><span class="badge ${c.status}">${c.status === 'unused' ? '未使用' : '已使用'}</span></td>
           <td>${c.book_title ? escapeHtml(c.book_title) : '-'}</td>
-          <td>${c.created_at}</td>
-          <td>${c.used_at || '-'}</td>
+          <td>${localTime(c.created_at)}</td>
+          <td>${localTime(c.used_at)}</td>
           <td>${c.status === 'unused'
             ? `<a href="#" data-del="${c.code_hash}">删除</a>`
             : '<span class="muted">不可删</span>'}</td>
