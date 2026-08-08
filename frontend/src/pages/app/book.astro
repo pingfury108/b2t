@@ -333,7 +333,7 @@ import Layout from '../../layouts/Layout.astro';
       font-size: 13px; background: var(--accent-soft); color: var(--accent);
       padding: 4px 12px; border-radius: 20px; white-space: nowrap;
     }
-    .badge.ok { background: #e6f3e7; color: #2e7d32; }
+    .badge.ok { background: var(--success-bg); color: var(--success); }
 
     .unlock-banner {
       background: var(--accent-soft); border: 1px solid var(--accent);
@@ -355,7 +355,7 @@ import Layout from '../../layouts/Layout.astro';
       display: flex; flex-direction: column; gap: 2px; font-size: 13px;
     }
     .steps li b { font-size: 15px; color: inherit; }
-    .steps li.done { border-color: #2e7d32; color: #2e7d32; }
+    .steps li.done { border-color: var(--success); color: var(--success); }
     .steps li.active { border-color: var(--accent); color: var(--accent); }
 
     .actions-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 4px; }
@@ -367,14 +367,14 @@ import Layout from '../../layouts/Layout.astro';
       text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 15px;
     }
     .chapters th { color: var(--ink-soft); font-weight: 600; font-size: 13px; }
-    .chapters tr.locked { color: #b0a99f; }
+    .chapters tr.locked { color: var(--muted); }
     .chapters .ops a { margin-right: 10px; white-space: nowrap; }
-    .chapters .err { color: #c62828; font-size: 13px; cursor: help; }
+    .chapters .err { color: var(--danger); font-size: 13px; cursor: help; }
 
     .playerbar {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
       background: var(--card); border-top: 1px solid var(--line);
-      padding: 10px 20px; box-shadow: 0 -2px 12px rgba(0,0,0,.06);
+      padding: 10px 20px; box-shadow: 0 -2px 12px var(--shadow);
     }
     .playerbar[hidden] { display: none; }
     .playerbar-inner {

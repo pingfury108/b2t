@@ -14,8 +14,17 @@ const { title, description = 'B2T · 把书变成有声书。支持 EPUB / TXT /
     <meta name="description" content={description} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <slot name="head" />
+    <script is:inline>
+      // 首屏渲染前确定主题，避免闪烁
+      (function () {
+        var t = localStorage.getItem('b2t-theme');
+        if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
     <style is:global>
       :root {
+        color-scheme: light;
         --ink: #1c1a17;
         --ink-soft: #6b6660;
         --bg: #faf8f4;
@@ -23,6 +32,28 @@ const { title, description = 'B2T · 把书变成有声书。支持 EPUB / TXT /
         --line: #e8e2d9;
         --accent: #b3541e;
         --accent-soft: #f6e8dd;
+        --success: #2e7d32;
+        --success-bg: #e6f3e7;
+        --danger: #c62828;
+        --muted: #b0a99f;
+        --overlay: rgba(0, 0, 0, .3);
+        --shadow: rgba(0, 0, 0, .12);
+      }
+      [data-theme="dark"] {
+        color-scheme: dark;
+        --ink: #e9e4dc;
+        --ink-soft: #a09a90;
+        --bg: #16130f;
+        --card: #221e19;
+        --line: #3b352d;
+        --accent: #d97b45;
+        --accent-soft: #38271a;
+        --success: #66bb6a;
+        --success-bg: #1c2a18;
+        --danger: #e57373;
+        --muted: #6f6a62;
+        --overlay: rgba(0, 0, 0, .6);
+        --shadow: rgba(0, 0, 0, .45);
       }
       * { box-sizing: border-box; margin: 0; }
       body {
@@ -72,6 +103,17 @@ const { title, description = 'B2T · 把书变成有声书。支持 EPUB / TXT /
         color: var(--ink); font-weight: 600;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
+      .theme-toggle {
+        background: none; border: 1px solid var(--line); color: var(--ink-soft);
+        width: 30px; height: 30px; border-radius: 50%; margin-left: 20px;
+        cursor: pointer; font-size: 14px; line-height: 1;
+      }
+      .theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+      /* 表单控件：背景是 var(--bg)/var(--card)，必须显式给文字色，否则暗色下黑字不可见 */
+      input, select, textarea {
+        color: var(--ink);
+        caret-color: var(--accent);
+      }
       .card {
         background: var(--card); border: 1px solid var(--line);
         border-radius: 10px; padding: 24px;
@@ -85,6 +127,7 @@ const { title, description = 'B2T · 把书变成有声书。支持 EPUB / TXT /
         <nav class="site">
           <a href="/help">使用帮助</a>
           <a href="/app" class="cta">开始制作</a>
+          <button id="theme-toggle" class="theme-toggle" aria-label="切换夜间模式" title="切换夜间模式">☾</button>
         </nav>
       </div>
     </header>
@@ -94,5 +137,18 @@ const { title, description = 'B2T · 把书变成有声书。支持 EPUB / TXT /
     <footer class="site">
       <div class="container">B2T · 把书变成有声书</div>
     </footer>
+    <script is:inline>
+      (function () {
+        var btn = document.getElementById('theme-toggle');
+        function sync() { btn.textContent = document.documentElement.dataset.theme === 'dark' ? '☀' : '☾'; }
+        btn.addEventListener('click', function () {
+          var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+          document.documentElement.dataset.theme = next;
+          localStorage.setItem('b2t-theme', next);
+          sync();
+        });
+        sync();
+      })();
+    </script>
   </body>
 </html>

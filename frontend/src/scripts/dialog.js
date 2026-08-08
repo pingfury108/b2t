@@ -12,13 +12,13 @@ function injectStyle() {
   style.textContent = `
     .dlg-mask {
       position: fixed; inset: 0; z-index: 100;
-      background: rgba(0, 0, 0, .3);
+      background: var(--overlay, rgba(0, 0, 0, .3));
       display: flex; align-items: center; justify-content: center;
     }
     .dlg {
       background: var(--card, #fff); color: var(--ink, #1c1a17);
       border: 1px solid var(--line, #e8e2d9); border-radius: 10px;
-      box-shadow: 0 8px 30px rgba(0, 0, 0, .12);
+      box-shadow: 0 8px 30px var(--shadow, rgba(0, 0, 0, .12));
       width: min(400px, 90vw); padding: 24px;
       font-family: inherit;
     }
