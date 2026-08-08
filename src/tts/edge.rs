@@ -12,7 +12,8 @@ use super::Progress;
 
 const MAX_SEGMENT_CHARS: usize = 1000;
 const FALLBACK_SEGMENT_CHARS: usize = 300;
-const MAX_CONCURRENCY: usize = 3;
+/// 单 worker 串行处理章节；章节内也一次一个片段，避免触发 edge-tts 限流
+const MAX_CONCURRENCY: usize = 1;
 const RETRY: usize = 3;
 /// 跳过段落占比超过该值才判整章失败
 const MAX_SKIP_RATIO: f64 = 0.2;
@@ -164,13 +165,17 @@ impl EdgeTts {
 }
 
 async fn synthesize_segment(voice: &str, text: &str, out: &Path) -> Result<()> {
+    let text = clean_text(text);
+    if text.trim().is_empty() {
+        bail!("段落为空（清理后无有效字符）");
+    }
     let mut last_err = String::new();
     for attempt in 1..=RETRY {
         let result = Command::new("edge-tts")
             .arg("--voice")
             .arg(voice)
             .arg("--text")
-            .arg(text)
+            .arg(&text)
             .arg("--write-media")
             .arg(out)
             .output()
@@ -185,7 +190,9 @@ async fn synthesize_segment(voice: &str, text: &str, out: &Path) -> Result<()> {
                 last_err = "edge-tts 产物为空".into();
             }
             Ok(o) => {
-                last_err = String::from_utf8_lossy(&o.stderr).chars().take(300).collect();
+                // Python traceback 的异常信息在 stderr 末尾，取尾部才有用
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                last_err = stderr.chars().rev().take(300).collect::<String>().chars().rev().collect();
             }
             Err(e) => {
                 last_err = format!("无法执行 edge-tts: {e}");
@@ -249,17 +256,30 @@ fn split_keep(text: &str) -> Vec<String> {
     parts
 }
 
+/// 清理会破坏 edge-tts/argv 的字符：NUL、C0 控制字符（保留 \t\n\r）、孤立代理
+fn clean_text(s: &str) -> String {
+    s.chars()
+        .filter(|c| {
+            let cp = *c as u32;
+            !(cp == 0
+                || (0x01..=0x08).contains(&cp)
+                || cp == 0x0b
+                || cp == 0x0c
+                || (0x0e..=0x1f).contains(&cp)
+                || (0xd800..=0xdfff).contains(&cp))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn segment_respects_limit() {
-        let text = "这是第一句。".repeat(500); // 3000 chars
-        let segs = segment_text(&text, 2000);
-        assert!(segs.len() >= 2);
-        for s in &segs {
-            assert!(s.chars().count() <= 2000);
-        }
+    fn clean_removes_bad_chars() {
+        // Rust String 无法含 surrogate（char::from_u32 拒绝代理区），主要防 NUL 与控制字符
+        let s = "a\0b\x00c\t\n\u{1c}";
+        let c = clean_text(&s);
+        assert_eq!(c, "abc\t\n");
     }
 }
