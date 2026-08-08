@@ -111,6 +111,7 @@ async fn main() -> Result<()> {
         base_url: cli.base_url.map(|u| u.trim_end_matches('/').to_string()),
     };
 
+    jobs::recover_interrupted(&state.db, &state.data_dir).await?;
     jobs::spawn_worker(state.clone());
 
     // 后台路由：登录/登出公开，其余接口由 cookie 中间件保护

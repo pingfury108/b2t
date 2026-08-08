@@ -27,6 +27,38 @@ pub fn spawn_worker(state: AppState) {
     });
 }
 
+/// 启动时恢复被中断的任务：running 的 job 与 synthesizing 的章节重置回
+/// pending，并清理孤儿工作目录。若音频其实已完成但崩在写库前，会重新合成（宁可重跑）。
+pub async fn recover_interrupted(db: &SqlitePool, data_dir: &std::path::Path) -> anyhow::Result<()> {
+    let running: Vec<i64> = sqlx::query_as("SELECT id FROM jobs WHERE status = 'running'")
+        .fetch_all(db)
+        .await?
+        .into_iter()
+        .map(|(id,)| id)
+        .collect();
+    if !running.is_empty() {
+        tracing::info!("recover {} interrupted job(s): {running:?}", running.len());
+        sqlx::query("UPDATE jobs SET status = 'pending', error = NULL WHERE status = 'running'")
+            .execute(db)
+            .await?;
+        sqlx::query(
+            "UPDATE chapters SET status = 'pending', error = NULL WHERE status = 'synthesizing'",
+        )
+        .execute(db)
+        .await?;
+    }
+    // 重启后没有活跃任务，tmp/job_* 均为孤儿目录，直接清理
+    let tmp = data_dir.join("tmp");
+    if let Ok(entries) = std::fs::read_dir(&tmp) {
+        for e in entries.flatten() {
+            if e.file_name().to_string_lossy().starts_with("job_") {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn next_pending_job(db: &SqlitePool) -> anyhow::Result<Option<(i64, i64)>> {
     let row: Option<(i64, i64)> = sqlx::query_as(
         "SELECT id, chapter_id FROM jobs WHERE status = 'pending' ORDER BY id LIMIT 1",
@@ -51,6 +83,11 @@ async fn run_job(state: &AppState, job_id: i64, chapter_id: i64) -> anyhow::Resu
         .bind(&chapter.book_id)
         .fetch_one(&state.db)
         .await?;
+    tracing::debug!(
+        "job {job_id} start, chapter {chapter_id} ({} chars), voice {}",
+        chapter.text.chars().count(),
+        voice.0
+    );
 
     sqlx::query("UPDATE chapters SET status = 'synthesizing', error = NULL WHERE id = ?")
         .bind(chapter_id)
@@ -87,12 +124,21 @@ async fn run_job(state: &AppState, job_id: i64, chapter_id: i64) -> anyhow::Resu
     watcher.abort();
 
     match result {
-        Ok(duration_ms) => {
+        Ok(sr) => {
+            // 有跳过段落时标记 partial（部分完成），error 列存提示信息
+            let status = if sr.skipped > 0 { "partial" } else { "done" };
+            let err_msg = if sr.skipped > 0 {
+                Some(format!("{} 段生成失败已跳过（共 {} 段）", sr.skipped, sr.total))
+            } else {
+                None
+            };
             sqlx::query(
-                "UPDATE chapters SET status = 'done', audio_path = ?, duration_ms = ?, error = NULL WHERE id = ?",
+                "UPDATE chapters SET status = ?, audio_path = ?, duration_ms = ?, error = ? WHERE id = ?",
             )
+            .bind(status)
             .bind(out_path.to_string_lossy().as_ref())
-            .bind(duration_ms as i64)
+            .bind(sr.duration_ms as i64)
+            .bind(err_msg)
             .bind(chapter_id)
             .execute(&state.db)
             .await?;
@@ -100,10 +146,22 @@ async fn run_job(state: &AppState, job_id: i64, chapter_id: i64) -> anyhow::Resu
                 .bind(job_id)
                 .execute(&state.db)
                 .await?;
-            tracing::info!("chapter {chapter_id} synthesized, {duration_ms}ms");
+            tracing::info!(
+                "chapter {chapter_id} synthesized, {}ms, skipped {}/{}",
+                sr.duration_ms,
+                sr.skipped,
+                sr.total
+            );
+            if sr.skipped > 0 {
+                tracing::warn!(
+                    "chapter {chapter_id} partial: {} segments skipped",
+                    sr.skipped
+                );
+            }
         }
         Err(e) => {
             let msg = truncate(&format!("{e:#}"), 500);
+            tracing::error!("chapter {chapter_id} synthesize failed: {msg}");
             sqlx::query("UPDATE chapters SET status = 'error', error = ? WHERE id = ?")
                 .bind(&msg)
                 .bind(chapter_id)

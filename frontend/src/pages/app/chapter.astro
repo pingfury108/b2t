@@ -54,7 +54,7 @@ import Layout from '../../layouts/Layout.astro';
       const c = state.chapter;
       $('#chapter-meta').textContent =
         `第 ${c.idx + 1} 章 · ${fmtChars(c.char_count)}` +
-        (cv?.status === 'done' ? ' · 已合成语音' : '');
+        (cv?.status === 'done' || cv?.status === 'partial' ? ' · 已合成语音' : '');
     }
 
     // ---------- 动作区：播放器 / 合成 / 进度 / 锁定 ----------
@@ -69,8 +69,9 @@ import Layout from '../../layouts/Layout.astro';
           <a href="/app/book/${state.book.id}">去解锁 →</a></div>`;
         return;
       }
-      if (cv.status === 'done') {
-        box.innerHTML = `<audio controls src="/api/chapters/${cv.id}/audio"></audio>`;
+      if (cv.status === 'done' || cv.status === 'partial') {
+        box.innerHTML = `<audio controls src="/api/chapters/${cv.id}/audio"></audio>`
+          + (cv.error ? `<div class="err-inline">${escapeHtml(cv.error)}</div>` : '');
         return;
       }
       if (['queued', 'synthesizing'].includes(cv.status)) {

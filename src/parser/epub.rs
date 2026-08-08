@@ -66,6 +66,12 @@ pub fn parse(path: &Path) -> Result<ParsedBook> {
     if chapters.is_empty() || chapters.iter().all(|c| c.text.is_empty()) {
         bail!("未能从 EPUB 提取到正文");
     }
+    tracing::debug!(
+        "epub: spine={} items, toc={} entries, {} chapters after merge",
+        spine.len(),
+        toc_titles.len(),
+        chapters.len()
+    );
     Ok(ParsedBook { title, chapters })
 }
 

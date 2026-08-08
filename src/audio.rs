@@ -94,11 +94,38 @@ pub async fn export_with_chapters(
     result
 }
 
+/// 生成指定时长的静音 mp3（占位用）
+pub async fn silent_mp3(out: &Path, seconds: f64) -> Result<()> {
+    run_ffmpeg(&[
+        "-y".into(),
+        "-f".into(),
+        "lavfi".into(),
+        "-i".into(),
+        "anullsrc=r=24000:cl=mono".into(),
+        "-t".into(),
+        format!("{seconds}"),
+        "-q:a".into(),
+        "9".into(),
+        out.to_string_lossy().into_owned(),
+    ])
+    .await
+}
+
 fn concat_list(inputs: &[PathBuf], near: &Path) -> Result<PathBuf> {
     let list = near.with_extension("concat.txt");
+    // ffmpeg concat demuxer 会把 list 内相对路径相对于 list 所在目录解析，
+    // 必须写成绝对路径，否则跨目录引用（如 tmp/audio）会找不到
+    let cwd = std::env::current_dir()?;
     let content = inputs
         .iter()
-        .map(|p| format!("file '{}'", p.to_string_lossy().replace('\'', "'\\''")))
+        .map(|p| {
+            let abs = if p.is_absolute() {
+                p.clone()
+            } else {
+                cwd.join(p)
+            };
+            format!("file '{}'", abs.to_string_lossy().replace('\'', "'\\''"))
+        })
         .collect::<Vec<_>>()
         .join("\n");
     std::fs::write(&list, content)?;

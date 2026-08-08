@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -10,9 +10,18 @@ use tokio::task::JoinSet;
 use crate::audio;
 use super::Progress;
 
-const MAX_SEGMENT_CHARS: usize = 2000;
+const MAX_SEGMENT_CHARS: usize = 1000;
+const FALLBACK_SEGMENT_CHARS: usize = 300;
 const MAX_CONCURRENCY: usize = 3;
 const RETRY: usize = 3;
+/// 跳过段落占比超过该值才判整章失败
+const MAX_SKIP_RATIO: f64 = 0.2;
+
+pub struct SynthesisResult {
+    pub duration_ms: u64,
+    pub skipped: usize,
+    pub total: usize,
+}
 
 pub struct EdgeTts {
     pub voice: String,
@@ -25,53 +34,118 @@ impl EdgeTts {
         }
     }
 
-    /// 长文本分段合成 + 合并，返回音频时长（毫秒）
+    /// 长文本分段合成 + 合并。失败段降级（细分重试）后仍失败则静音占位跳过，
+    /// 跳过占比在阈值内返回部分成功，避免整章重来。
     pub async fn synthesize_long(
         &self,
         text: &str,
         work_dir: &Path,
         output: &Path,
         progress: Arc<Progress>,
-    ) -> Result<u64> {
+    ) -> Result<SynthesisResult> {
         let segments = segment_text(text, MAX_SEGMENT_CHARS);
         if segments.is_empty() {
             bail!("章节内容为空");
         }
-
+        let total = segments.len();
         std::fs::create_dir_all(work_dir)?;
-        let sem = Arc::new(Semaphore::new(MAX_CONCURRENCY));
-        let mut set: JoinSet<Result<PathBuf>> = JoinSet::new();
+        tracing::debug!(
+            "segment split: {total} segments (max {MAX_SEGMENT_CHARS} chars), voice {}",
+            self.voice
+        );
 
-        for (i, seg) in segments.iter().enumerate() {
-            let seg_path = work_dir.join(format!("seg_{i:05}.mp3"));
-            let voice = self.voice.clone();
-            let text = seg.clone();
-            let sem = sem.clone();
-            let progress = progress.clone();
-            set.spawn(async move {
-                let _permit = sem.acquire().await.unwrap();
-                synthesize_segment(&voice, &text, &seg_path).await?;
-                progress.incr();
-                Ok(seg_path)
-            });
-        }
+        // 静音占位（跳过段落处保持时间线完整）
+        let silent = work_dir.join("silent.mp3");
+        audio::silent_mp3(&silent, 0.5).await?;
 
-        let mut seg_files: Vec<PathBuf> = Vec::with_capacity(segments.len());
-        while let Some(res) = set.join_next().await {
-            match res {
-                Ok(Ok(p)) => seg_files.push(p),
-                Ok(Err(e)) => {
-                    set.abort_all();
-                    return Err(e);
-                }
-                Err(e) => {
-                    set.abort_all();
-                    return Err(e).context("TTS 任务异常");
+        // 阶段一：并发合成全部段，失败不中断，只收集结果
+        let mut slots: Vec<Option<PathBuf>> = vec![None; total];
+        {
+            let sem = Arc::new(Semaphore::new(MAX_CONCURRENCY));
+            let mut set: JoinSet<(usize, Result<PathBuf>)> = JoinSet::new();
+            for (i, seg) in segments.iter().enumerate() {
+                let seg_path = work_dir.join(format!("seg_{i:05}.mp3"));
+                let voice = self.voice.clone();
+                let text = seg.clone();
+                let sem = sem.clone();
+                let progress = progress.clone();
+                set.spawn(async move {
+                    let _permit = sem.acquire().await.unwrap();
+                    let r = synthesize_segment(&voice, &text, &seg_path).await;
+                    if r.is_ok() {
+                        progress.incr();
+                        tracing::debug!("segment {i} done");
+                    }
+                    (i, r.map(|_| seg_path))
+                });
+            }
+            while let Some(res) = set.join_next().await {
+                match res {
+                    Ok((i, Ok(p))) => slots[i] = Some(p),
+                    Ok((i, Err(e))) => {
+                        tracing::warn!("segment {i} synthesize failed: {e:#}");
+                        slots[i] = None;
+                    }
+                    Err(e) => {
+                        tracing::warn!("segment task panicked: {e:#}");
+                    }
                 }
             }
+            let ok_count = slots.iter().filter(|s| s.is_some()).count();
+            tracing::debug!("stage1 done: {ok_count}/{total} segments ok");
         }
-        seg_files.sort();
 
+        // 阶段二：失败段按更小粒度细分重试，仍失败则静音占位
+        let failed: Vec<usize> = slots
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.is_none())
+            .map(|(i, _)| i)
+            .collect();
+        if !failed.is_empty() {
+            tracing::debug!(
+                "stage2: retrying {} failed segments at {FALLBACK_SEGMENT_CHARS} chars",
+                failed.len()
+            );
+        }
+        let mut skipped = 0usize;
+        for i in failed {
+            let slot = &mut slots[i];
+            let sub_segs = segment_text(&segments[i], FALLBACK_SEGMENT_CHARS);
+            let mut parts = Vec::new();
+            let mut ok = true;
+            for (j, sub) in sub_segs.iter().enumerate() {
+                let sub_path = work_dir.join(format!("seg_{i:05}_{j:05}.mp3"));
+                if let Err(e) = synthesize_segment(&self.voice, sub, &sub_path).await {
+                    tracing::warn!("segment {i} fallback part {j} failed: {e:#}");
+                    parts.clear();
+                    ok = false;
+                    break;
+                }
+                parts.push(sub_path);
+            }
+            if ok && !parts.is_empty() {
+                let combined = work_dir.join(format!("seg_{i:05}.mp3"));
+                if parts.len() == 1 {
+                    std::fs::rename(&parts[0], &combined)?;
+                } else {
+                    audio::concat_mp3(&parts, &combined).await?;
+                }
+                progress.incr();
+                *slot = Some(combined);
+            } else {
+                tracing::warn!("segment {i} skipped (replaced with silence)");
+                skipped += 1;
+                *slot = Some(silent.clone());
+            }
+        }
+
+        if skipped as f64 / total as f64 > MAX_SKIP_RATIO {
+            bail!("生成失败段落过多（{skipped}/{total}），请重试");
+        }
+
+        let seg_files: Vec<PathBuf> = slots.into_iter().flatten().collect();
+        tracing::debug!("concatenating {} segments -> {}", seg_files.len(), output.display());
         if seg_files.len() == 1 {
             std::fs::rename(&seg_files[0], output)?;
         } else {
@@ -80,7 +154,12 @@ impl EdgeTts {
 
         let duration = audio::ffprobe_duration_ms(output).await.unwrap_or(0);
         let _ = std::fs::remove_dir_all(work_dir);
-        Ok(duration)
+        tracing::debug!("synthesized, duration {duration}ms, skipped {skipped}/{total}");
+        Ok(SynthesisResult {
+            duration_ms: duration,
+            skipped,
+            total,
+        })
     }
 }
 

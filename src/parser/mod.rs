@@ -20,13 +20,22 @@ pub struct ParsedChapter {
 }
 
 pub fn parse_book(path: &Path, ext: &str, filename_stem: &str) -> Result<ParsedBook> {
-    match ext {
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    tracing::debug!("parsing {ext} file ({size} bytes): {}", path.display());
+    let book = match ext {
         "epub" => epub::parse(path),
         "txt" => txt::parse(path, filename_stem),
         "md" => txt::parse_markdown(path, filename_stem),
         "pdf" => pdf::parse(path, filename_stem),
         _ => bail!("不支持的格式: {ext}（支持 epub / txt / md / pdf）"),
-    }
+    }?;
+    tracing::debug!(
+        "parsed: {} chapters, {} chars, title {:?}",
+        book.chapters.len(),
+        book.chapters.iter().map(|c| c.text.chars().count()).sum::<usize>(),
+        book.title
+    );
+    Ok(book)
 }
 
 /// 按 markdown 一二级标题切章；识别不到标题时回退到 txt 的章节正则

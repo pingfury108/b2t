@@ -23,6 +23,11 @@ pub fn split_chapters(text: &str, fallback_title: &str) -> Result<ParsedBook> {
     let text = text.replace("\r\n", "\n");
     let re = chapter_heading_regex();
     let matches: Vec<_> = re.find_iter(&text).collect();
+    tracing::debug!(
+        "txt: {} chars, {} chapter headings matched",
+        text.chars().count(),
+        matches.len()
+    );
 
     let mut chapters: Vec<ParsedChapter> = Vec::new();
     if matches.len() >= 2 && matches.len() < 2000 {

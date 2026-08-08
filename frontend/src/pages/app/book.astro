@@ -94,7 +94,7 @@ import Layout from '../../layouts/Layout.astro';
     }
     const STATUS_TEXT = {
       pending: '待合成', queued: '排队中', synthesizing: '合成中',
-      done: '已完成', error: '失败',
+      done: '已完成', partial: '部分完成', error: '失败',
     };
 
     function statusText(c) {
@@ -111,12 +111,12 @@ import Layout from '../../layouts/Layout.astro';
     function rowHtml(c) {
       const s = statusText(c);
       const actions = [
-        c.status === 'done' ? `<a href="#" data-play="${c.id}">试听</a>` : '',
+        (c.status === 'done' || c.status === 'partial') ? `<a href="#" data-play="${c.id}">试听</a>` : '',
         `<a href="/app/book/${bookId}/chapter/${c.id}">文本</a>`,
         (!c.locked && !['done', 'queued', 'synthesizing'].includes(c.status))
-          ? `<a href="#" data-synth="${c.id}">${c.status === 'error' ? '重试' : '合成'}</a>` : '',
-        c.status === 'error' && c.error
-          ? `<span class="err" title="${escapeHtml(c.error)}">查看错误</span>` : '',
+          ? `<a href="#" data-synth="${c.id}">${(c.status === 'error' || c.status === 'partial') ? '重试' : '合成'}</a>` : '',
+        (c.status === 'error' || c.status === 'partial') && c.error
+          ? `<span class="err" title="${escapeHtml(c.error)}">${c.status === 'partial' ? '详情' : '查看错误'}</span>` : '',
       ].filter(Boolean).join(' ');
       return `<tr data-cid="${c.id}" class="${c.locked ? 'locked' : ''}">
         <td>${c.idx + 1}</td>
@@ -144,7 +144,7 @@ import Layout from '../../layouts/Layout.astro';
 
     function renderSteps() {
       const chs = state.book.chapters;
-      const done = chs.filter(c => c.status === 'done').length;
+      const done = chs.filter(c => ['done', 'partial'].includes(c.status)).length;
       const busy = chs.some(c => ['queued', 'synthesizing'].includes(c.status));
       $('#step1-text').textContent = `${chs.length} 章`;
       $('#step2-text').textContent = done === chs.length && chs.length > 0

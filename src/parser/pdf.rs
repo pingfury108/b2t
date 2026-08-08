@@ -15,11 +15,19 @@ pub fn parse(path: &Path, filename_stem: &str) -> Result<ParsedBook> {
         .context("PDF 解析失败")?;
 
     use pdf_inspector::PdfType;
-    match result.pdf_type {
+    let pdf_type = result.pdf_type.clone();
+    match pdf_type {
         PdfType::TextBased | PdfType::Mixed => {}
         _ => bail!("暂不支持扫描版/图片型 PDF（无文本层）"),
     }
 
     let markdown = result.markdown.context("PDF 未提取到文本内容")?;
+    let page_marks = markdown.matches("<!-- Page ").count();
+    tracing::debug!(
+        "pdf: type={:?}, {} pages, {} markdown chars",
+        pdf_type,
+        page_marks,
+        markdown.chars().count()
+    );
     Ok(split_markdown_chapters(&markdown, filename_stem))
 }
