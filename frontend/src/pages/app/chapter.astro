@@ -66,7 +66,7 @@ import Layout from '../../layouts/Layout.astro';
 
       if (cv.locked) {
         box.innerHTML = `<div class="note">🔒 本章需解锁后才能合成语音
-          <a href="/app/book/${state.book.id}">去解锁 →</a></div>`;
+          <a href="/app/book/${state.book.id}">去解锁 →</a> · <a href="/#purchase" target="_blank">如何购买？</a></div>`;
         return;
       }
       if (cv.status === 'done' || cv.status === 'partial') {

@@ -43,11 +43,29 @@ import Layout from '../layouts/Layout.astro';
     </ol>
   </section>
 
+  <section class="container purchase" id="purchase">
+    <h2>如何获取授权码</h2>
+    <div class="purchase-inner">
+      <div class="purchase-text">
+        <p>每本书前 3 章免费试听。解锁全部章节需要一枚授权码（一码一书）。</p>
+        <ol>
+          <li><strong>添加微信</strong> —— 扫码或长按识别右侧二维码。</li>
+          <li><strong>发送书名</strong> —— 备注「B2T」，告诉我们要解锁哪本书。</li>
+          <li><strong>输入授权码</strong> —— 收到后，在书籍页输入即可解锁全部章节。</li>
+        </ol>
+      </div>
+      <figure class="purchase-qr">
+        <img src="/wechat-qr.jpg" alt="微信二维码" width="200" height="200" loading="lazy" />
+        <figcaption>微信扫码，备注「B2T」</figcaption>
+      </figure>
+    </div>
+  </section>
+
   <section class="container faq">
     <h2>常见问题</h2>
     <details>
       <summary>授权码是什么？</summary>
-      <p>授权码用于解锁一本书的全部章节（前 3 章免费无需授权码）。一个授权码可解锁一本书。你可以通过其他渠道购买授权码，在书籍页面输入即可解锁。</p>
+      <p>授权码用于解锁一本书的全部章节（前 3 章免费，无需授权码）。一个授权码可解锁一本书。购买方式见 <a href="#purchase">如何获取授权码</a>。</p>
     </details>
     <details>
       <summary>需要注册账号吗？</summary>
@@ -78,6 +96,22 @@ import Layout from '../layouts/Layout.astro';
     .steps ol { padding-left: 22px; color: var(--ink-soft); }
     .steps li { margin: 10px 0; }
     .faq { margin-top: 64px; }
+    .purchase { margin-top: 64px; }
+    .purchase-inner {
+      display: flex; gap: 32px; align-items: center;
+      background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 28px;
+    }
+    .purchase-text p { color: var(--ink-soft); margin-top: 8px; }
+    .purchase-text ol { margin: 14px 0 0 20px; color: var(--ink-soft); }
+    .purchase-text li { margin: 8px 0; }
+    .purchase-qr { margin-left: auto; text-align: center; }
+    .purchase-qr img { display: block; border-radius: 8px; border: 1px solid var(--line); }
+    .purchase-qr figcaption { margin-top: 10px; font-size: 13px; color: var(--accent); }
+    @media (max-width: 640px) {
+      .purchase-inner { flex-direction: column; text-align: center; }
+      .purchase-qr { margin-left: 0; }
+      .purchase-text ol { text-align: left; }
+    }
     .faq details {
       background: var(--card); border: 1px solid var(--line); border-radius: 8px;
       padding: 14px 18px; margin-bottom: 10px;

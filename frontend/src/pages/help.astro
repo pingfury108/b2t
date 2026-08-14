@@ -22,7 +22,14 @@ import Layout from '../layouts/Layout.astro';
 
     <h2>免费额度与授权码</h2>
     <p>每本书的<strong>前 3 章</strong>免费合成试听，无需任何费用、无需注册。</p>
-    <p>第 4 章起需要授权码解锁。授权码可通过其他渠道购买，<strong>一个授权码解锁一本书</strong>。在书籍页面输入授权码后，全书章节立即开放合成。</p>
+    <p>第 4 章起需要授权码解锁。<strong>一个授权码解锁一本书</strong>。在书籍页面输入授权码后，全书章节立即开放合成。</p>
+
+    <h3>如何购买授权码</h3>
+    <p>添加微信（扫码或长按识别下方二维码），备注「B2T」并发送要解锁的书名，即可获取授权码。</p>
+    <figure class="doc-qr">
+      <img src="/wechat-qr.jpg" alt="微信二维码" width="160" height="160" loading="lazy" />
+      <figcaption>微信扫码，备注「B2T」</figcaption>
+    </figure>
 
     <h2>找回我的书</h2>
     <p>你的书籍保存在当前浏览器会话中。如果换浏览器或清除 Cookie，已解锁的书可以在「开始制作」页面<strong>输入授权码找回</strong>。未解锁的书无法找回，请重新上传。</p>
@@ -53,5 +60,8 @@ import Layout from '../layouts/Layout.astro';
     .doc ul, .doc ol { padding-left: 24px; }
     .doc li { margin: 6px 0; }
     .doc .back { margin-top: 48px; font-weight: 600; }
+    .doc-qr { margin-top: 16px; display: inline-block; text-align: center; }
+    .doc-qr img { border: 1px solid var(--line); border-radius: 8px; }
+    .doc-qr figcaption { margin-top: 8px; font-size: 13px; color: var(--accent); }
   </style>
 </Layout>
