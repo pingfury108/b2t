@@ -108,7 +108,15 @@ async fn main() -> Result<()> {
         db: pool,
         data_dir: cli.data_dir,
         admin_key: cli.admin_key,
-        base_url: cli.base_url.map(|u| u.trim_end_matches('/').to_string()),
+        // 规范化：去掉尾部斜杠、补全协议头，保证 sitemap/canonical 输出合法绝对 URL
+        base_url: cli.base_url.map(|u| {
+            let u = u.trim_end_matches('/');
+            if u.starts_with("http://") || u.starts_with("https://") {
+                u.to_string()
+            } else {
+                format!("https://{u}")
+            }
+        }),
     };
 
     jobs::recover_interrupted(&state.db, &state.data_dir).await?;
@@ -151,6 +159,7 @@ async fn main() -> Result<()> {
         .route("/api/license/{code}", get(routes::license_lookup))
         .route("/api/voices", get(routes::voice_list))
         .route("/sitemap.xml", get(static_files::sitemap))
+        .route("/robots.txt", get(static_files::robots_txt))
         .nest("/api/admin", admin_public.merge(admin_protected))
         .fallback(get(static_files::static_handler))
         .layer(DefaultBodyLimit::max(200 * 1024 * 1024))

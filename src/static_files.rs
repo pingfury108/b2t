@@ -20,15 +20,23 @@ pub async fn static_handler(State(state): State<AppState>, uri: Uri) -> Response
             if let Some(resp) = seo_book_page(&state, id).await {
                 return resp;
             }
-            serve("app/book/index.html")
+            serve("app/book/index.html", None)
         }
         ["app", "book", _id, "chapter", cid] => {
             if let Some(resp) = seo_chapter_page(&state, cid).await {
                 return resp;
             }
-            serve("app/chapter/index.html")
+            serve("app/chapter/index.html", None)
         }
-        _ => serve(&map_path(path)),
+        _ => {
+            // 静态页自引用 canonical；未知路径走 SPA fallback，不加
+            let canonical = match path.trim_end_matches('/') {
+                "" => canonical_url(&state, "/"),
+                p @ ("help" | "app") => canonical_url(&state, &format!("/{p}")),
+                _ => None,
+            };
+            serve(&map_path(path), canonical)
+        }
     }
 }
 
@@ -49,10 +57,16 @@ fn map_path(path: &str) -> String {
         .unwrap_or_else(|| "index.html".into())
 }
 
-fn serve(path: &str) -> Response {
+fn serve(path: &str, canonical: Option<String>) -> Response {
     match Assets::get(path) {
         Some(file) => {
             let mime = mime_guess::from_path(path).first_or_octet_stream();
+            if let (Some(url), "text/html") = (canonical, mime.as_ref()) {
+                let tag = format!("<link rel=\"canonical\" href=\"{}\" />", esc(&url));
+                let html = String::from_utf8_lossy(&file.data)
+                    .replacen("</head>", &format!("{tag}</head>"), 1);
+                return serve_html(html);
+            }
             (
                 [(header::CONTENT_TYPE, mime.as_ref())],
                 file.data.into_owned(),
@@ -61,6 +75,10 @@ fn serve(path: &str) -> Response {
         }
         None => (StatusCode::NOT_FOUND, Body::from("frontend not built")).into_response(),
     }
+}
+
+fn canonical_url(state: &AppState, path: &str) -> Option<String> {
+    state.base_url.as_ref().map(|b| format!("{b}{path}"))
 }
 
 fn serve_html(html: String) -> Response {
@@ -114,10 +132,13 @@ async fn seo_book_page(state: &AppState, book_id: &str) -> Option<Response> {
         "name": title,
         "numberOfPages": chapters.len(),
     });
+    let canonical = canonical_url(&state, &format!("/app/book/{book_id}"))
+        .map(|u| format!("<link rel=\"canonical\" href=\"{}\" />", esc(&u)))
+        .unwrap_or_default();
     inject_head(
         &mut html,
         &format!("《{title}》有声书，共 {} 章，在线收听与下载", chapters.len()),
-        &format!("<script type=\"application/ld+json\">{json_ld}</script>"),
+        &format!("<script type=\"application/ld+json\">{json_ld}</script>{canonical}"),
     );
 
     html = html.replace(
@@ -197,10 +218,13 @@ async fn seo_chapter_page(state: &AppState, chapter_id: &str) -> Option<Response
         "position": idx + 1,
         "isPartOf": { "@type": "Book", "name": book_title },
     });
+    let canonical = canonical_url(&state, &format!("/app/book/{book_id}/chapter/{cid}"))
+        .map(|u| format!("<link rel=\"canonical\" href=\"{}\" />", esc(&u)))
+        .unwrap_or_default();
     inject_head(
         &mut html,
         &description,
-        &format!("<script type=\"application/ld+json\">{json_ld}</script>"),
+        &format!("<script type=\"application/ld+json\">{json_ld}</script>{canonical}"),
     );
 
     html = html.replace(r#"id="reader" hidden>"#, r#"id="reader">"#);
@@ -257,6 +281,24 @@ async fn seo_chapter_page(state: &AppState, chapter_id: &str) -> Option<Response
     }
 
     Some(serve_html(html))
+}
+
+/// robots.txt：静态内容 + 追加 Sitemap 声明（需 --base-url）
+pub async fn robots_txt(State(state): State<AppState>) -> Response {
+    let mut text = Assets::get("robots.txt")
+        .map(|f| String::from_utf8_lossy(&f.data).into_owned())
+        .unwrap_or_else(|| "User-agent: *\n".to_string());
+    if let Some(base) = &state.base_url {
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&format!("Sitemap: {base}/sitemap.xml\n"));
+    }
+    (
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        text,
+    )
+        .into_response()
 }
 
 /// 动态 sitemap（需 --base-url）
